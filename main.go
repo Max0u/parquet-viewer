@@ -4,21 +4,23 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 
 	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
 	modelStyle = lipgloss.NewStyle().
-			Width(50).
-			Height(10).
+			Width(100).
+			Height(25).
 			BorderStyle(lipgloss.HiddenBorder())
 	focusedModelStyle = lipgloss.NewStyle().
 				Width(100).
-				Height(10).
+				Height(25).
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderForeground(lipgloss.Color("69"))
 	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -28,8 +30,9 @@ type mainModel struct {
 	selectedFile     string
 	windows          []*Window
 	focusWindow      *Window
-	filePickerWindow Window
-	tableWindow      Window
+	filePickerWindow *Window
+	tableWindow      *Window
+	textInputWindow  *Window
 }
 
 func newModel() mainModel {
@@ -37,7 +40,7 @@ func newModel() mainModel {
 
 	m.selectedFile = "/Users/maxime/perso/vibe-parquet-viewer/airflow_2024072902_chunk_13_0.parquet"
 
-	m.filePickerWindow = Window{
+	m.filePickerWindow = &Window{
 		x:     0,
 		y:     0,
 		model: filepicker.New(),
@@ -45,42 +48,70 @@ func newModel() mainModel {
 	if fp, ok := m.filePickerWindow.model.(filepicker.Model); ok {
 		fp.AllowedTypes = []string{""}
 		fp.ShowPermissions = false
+		fp.AutoHeight = false
+		fp.Height = 25
+
 		fp.ShowHidden = false
-		fp.CurrentDirectory, _ = os.UserHomeDir()
+		// fp.CurrentDirectory, _ = os.UserHomeDir()
+		m.filePickerWindow.model = fp
 	}
 
 	// Initialize with empty table
-	m.tableWindow = Window{
+	m.tableWindow = &Window{
 		x: 1,
 		y: 0,
 		model: table.New(
 			table.WithColumns([]table.Column{}),
 			table.WithRows([]table.Row{}),
 			table.WithFocused(true),
-			table.WithHeight(10),
+			table.WithHeight(25),
+			table.WithWidth(50),
 		),
 	}
+	if t, ok := m.tableWindow.model.(table.Model); ok {
+		s := table.DefaultStyles()
+		s.Header = s.Header.
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			BorderBottom(true).
+			Bold(false)
+		s.Selected = s.Selected.
+			Foreground(lipgloss.Color("229")).
+			Background(lipgloss.Color("57")).
+			Bold(false)
+		t.SetStyles(s)
 
-	m.windows = []*Window{&m.filePickerWindow, &m.tableWindow}
-	m.focusWindow = &m.filePickerWindow
+		m.tableWindow.model = t
+	}
+
+	m.textInputWindow = &Window{
+		x:     0,
+		y:     1,
+		model: textinput.New(),
+	}
+	if ti, ok := m.filePickerWindow.model.(textinput.Model); ok {
+		ti.Placeholder = "Pikachu"
+		ti.CharLimit = 156
+		ti.Width = 20
+		m.textInputWindow.model = ti
+	}
+
+	// m.windows = []*Window{&m.filePickerWindow}
+	m.windows = []*Window{m.filePickerWindow, m.tableWindow, m.textInputWindow}
+	m.focusWindow = m.filePickerWindow
 
 	return m
 }
 
 func (m mainModel) Init() tea.Cmd {
-
-	var fp filepicker.Model
-	var ok bool
-
-	if fp, ok = m.filePickerWindow.model.(filepicker.Model); !ok {
-		log.Println("model in filePickerWindow1 is not of type filepicker.Model")
+	fp, ok := m.filePickerWindow.model.(filepicker.Model)
+	if !ok {
+		// This should never happen. At this state, prefer assuming that this should never happen instead of
+		//handling this case later.
+		panic("should not happen")
 	}
 
-	if ok {
-		return tea.Batch(fp.Init())
-	}
-
-	return nil // Or an appropriate default `tea.Cmd`
+	return fp.Init()
 }
 
 func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -104,23 +135,30 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch model := m.focusWindow.model.(type) {
 	case filepicker.Model:
+		log.Printf("%d", model.Height)
+		log.Printf("%s", model.AutoHeight)
 		// Update the file picker model with the incoming message
 		model, cmd := model.Update(msg)
 
-		m.filePickerWindow.model = model
+		m.focusWindow.model = model
 
 		// Did the user select a file?
 		if didSelect, path := model.DidSelectFile(msg); didSelect {
 			// Get the path of the selected file.
 			m.selectedFile = path
+			m.loadParquetFile()
 		}
 		cmds = append(cmds, cmd)
 	case table.Model:
 		model, cmd = model.Update(msg)
-		m.tableWindow.model = model
+		m.focusWindow.model = model
+		cmds = append(cmds, cmd)
+	case textinput.Model:
+		model.Focus()
+		model, cmd = model.Update(msg)
+		m.focusWindow.model = model
 		cmds = append(cmds, cmd)
 	default:
-		cmds = append(cmds, cmd)
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -131,7 +169,11 @@ func (m mainModel) View() string {
 
 	// Group windows by y coordinate for horizontal joining
 	for _, win := range m.windows {
-		yGroups[win.y] = append(yGroups[win.y], modelStyle.Render(win.model.View()))
+		if win.x == m.focusWindow.x && win.y == m.focusWindow.y {
+			yGroups[win.y] = append(yGroups[win.y], focusedModelStyle.Render(win.model.View()))
+		} else {
+			yGroups[win.y] = append(yGroups[win.y], modelStyle.Render(win.model.View()))
+		}
 	}
 
 	// Sort yGroups into slices for ordered joining
@@ -139,6 +181,8 @@ func (m mainModel) View() string {
 	for y := range yGroups {
 		yKeys = append(yKeys, y)
 	}
+
+	sort.Ints(yKeys)
 
 	// Join models horizontally for each y group
 	var horizontalGroups []string
@@ -153,7 +197,7 @@ func (m mainModel) View() string {
 	// Add help text
 	helpText := helpStyle.Render("\ntab: focus next • n: new model • q: exit\n")
 	result += helpText
-
+	// log.Printf(result)
 	return result
 
 }

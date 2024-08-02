@@ -6,12 +6,19 @@ import (
 	"log"
 	"os"
 
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/xitongsys/parquet-go-source/local"
 	"github.com/xitongsys/parquet-go/reader"
-	"github.com/xitongsys/parquet-go/tool/parquet-tools/schematool"
 )
 
 func (m *mainModel) loadParquetFile() error {
+	tableModel, ok := m.tableWindow.model.(table.Model)
+	if !ok {
+		// This should never happen. At this state, prefer assuming that this should never happen instead of
+		//handling this case later.
+		panic("should not happen")
+	}
+
 	fr, err := local.NewLocalFileReader(m.selectedFile)
 	if err != nil {
 		return err
@@ -24,33 +31,11 @@ func (m *mainModel) loadParquetFile() error {
 	}
 	defer pr.ReadStop()
 
-	tree := schematool.CreateSchemaTree(pr.SchemaHandler.SchemaElements)
-	log.Printf("%s\n", tree.OutputJsonSchema())
-
-	// Get column names from the Parquet file schema
-	// columns := []table.Column{}
-	// for _, schemaElem := range pr.SchemaHandler.SchemaElements {
-	// 	if schemaElem.GetNumChildren() == 0 { // leaf nodes represent actual columns
-	// 		column := table.Column{
-	// 			Title: schemaElem.Name,
-	// 			Width: len(schemaElem.Name) + 5, // adding a bit of padding for display
-	// 		}
-	// 		log.Printf(schemaElem.Name)
-	// 		columns = append(columns, column)
-	// 	}
-	// }
-	// m.tableView.SetColumns(columns)
-
-	res, err := pr.ReadByNumber(1)
+	res, err := pr.ReadByNumber(5) // Read only the first 5 rows
 	if err != nil {
 		log.Println("Can't read", err)
 	}
 
-	// rowsData, err := json.Marshal(res)
-	// if err != nil {
-	// 	fmt.Fprintf(os.Stderr, "Can't convert to json: %s\n", err)
-	// 	os.Exit(1)
-	// }
 	jsonData, err := json.Marshal(res)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Can't convert to json: %s\n", err)
@@ -66,26 +51,37 @@ func (m *mainModel) loadParquetFile() error {
 	}
 
 	// Determine columns from the first row (if available)
-	// if len(rowsData) > 0 {
-	// 	columns := []table.Column{}
-	// 	for col := range rowsData[0] {
-	// 		columns = append(columns, table.Column{
-	// 			Title: col,
-	// 			Width: len(col) + 5,
-	// 		})
-	// 	}
-	// 	m.tableView.SetColumns(columns)
+	if len(rowsData) > 0 {
+		columns := []table.Column{}
+		colCount := 0
+		for col := range rowsData[0] {
+			columns = append(columns, table.Column{
+				Title: col,
+				Width: len(col) + 5,
+			})
+			colCount++
+			if colCount >= 3 {
+				break // Keep only the first 5 columns
+			}
+		}
+		tableModel.SetColumns(columns)
 
-	// 	// Fill table rows
-	// 	rows := []table.Row{}
-	// 	for _, rowData := range rowsData {
-	// 		row := make(table.Row, len(columns))
-	// 		for i, col := range columns {
-	// 			row[i] = fmt.Sprintf("%v", rowData[col.Title])
-	// 		}
-	// 		rows = append(rows, row)
-	// 	}
-	// 	m.tableView.SetRows(rows)
-	// }
+		log.Printf("%v", columns)
+
+		// Fill table rows
+		rows := []table.Row{}
+		for _, rowData := range rowsData {
+			row := make(table.Row, len(columns))
+			for i, col := range columns {
+				row[i] = fmt.Sprintf("%v", rowData[col.Title])
+			}
+			rows = append(rows, row)
+		}
+		tableModel.SetRows(rows)
+
+		log.Printf("%v", rows)
+
+	}
+	m.tableWindow.model = tableModel
 	return nil
 }

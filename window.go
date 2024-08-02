@@ -87,22 +87,3 @@ func isValidDirection(currentWindow Window, targetWindow Window, dirVector [2]in
 func calculateDistance(currentWindow Window, targetWindow Window, dirVector [2]int) float64 {
 	return math.Abs(float64(targetWindow.x-currentWindow.x)) + math.Abs(float64(targetWindow.y-currentWindow.y))
 }
-
-// func main() {
-// 	// Example windows with only positions
-// 	windows := []Window{
-// 		{0, 0},     // Window 0
-// 		{300, 0},   // Window 1
-// 		{300, 300}, // Window 2
-// 	}
-
-// 	currentWindow := windows[0]
-
-// 	// Example navigation
-// 	nextWindow := FindNextWindow(windows, currentWindow, "right")
-// 	if nextWindow != nil {
-// 		fmt.Printf("Next window in the 'right' direction: %+v\n", *nextWindow)
-// 	} else {
-// 		fmt.Println("No window found in the 'right' direction.")
-// 	}
-// }
